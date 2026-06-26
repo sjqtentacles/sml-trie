@@ -32,6 +32,7 @@ struct
         end
 
   fun root t = simpleHash (serialize t)
+  fun rootWith hash t = hash (serialize t)
 
   fun updateAssoc key newVal [] = [(key, newVal)]
     | updateAssoc key newVal ((k2, v2) :: rest) =
@@ -147,5 +148,107 @@ struct
             end
     in
       go trie0 ""
+    end
+
+  fun keys t = List.map #1 (toList t)
+  fun values t = List.map #2 (toList t)
+
+  fun member t key = Option.isSome (lookup t key)
+
+  fun isEmpty Empty = true
+    | isEmpty (Node {value = SOME _, ...}) = false
+    | isEmpty (Node {value = NONE, children}) = List.all (fn (_, ch) => isEmpty ch) children
+
+  fun size t = List.length (toList t)
+
+  fun fold f acc t =
+    List.foldl (fn ((k, v), a) => f (k, v, a)) acc (toList t)
+
+  fun fromList kvs =
+    List.foldl (fn ((k, v), t) => insert t k v) (empty ()) kvs
+
+  fun mapValues g t =
+    fromList (List.map (fn (k, v) => (k, g v)) (toList t))
+
+  fun filter p t =
+    fromList (List.filter p (toList t))
+
+  (* left-biased: keys from `a` override keys from `b` *)
+  fun union a b =
+    let
+      val merged = toList b   (* start with b, then overwrite with a *)
+      val withA = List.foldl (fn ((k, v), t) => insert t k v)
+                    (fromList merged) (toList a)
+    in
+      withA
+    end
+
+  (* Descend to the node reached by following `prefix`; NONE if the path is
+     absent from the trie. *)
+  fun nodeAt trie0 prefix =
+    let
+      val plen = String.size prefix
+      fun go node i =
+        if i = plen then SOME node
+        else
+          case node of
+            Empty => NONE
+          | Node {children, ...} =>
+              let val c = String.sub (prefix, i) in
+                case List.find (fn (c2, _) => c = c2) children of
+                  NONE => NONE
+                | SOME (_, child) => go child (i + 1)
+              end
+    in
+      go trie0 0
+    end
+
+  fun withPrefix t prefix =
+    case nodeAt t prefix of
+      NONE => []
+    | SOME node =>
+        let
+          fun go n p =
+            case n of
+              Empty => []
+            | Node {value, children} =>
+                let
+                  val here = case value of NONE => [] | SOME v => [(p, v)]
+                  val below = List.concat
+                    (List.map (fn (c, ch) => go ch (p ^ String.str c)) children)
+                in here @ below end
+        in
+          go node prefix
+        end
+
+  fun hasPrefix t prefix =
+    case nodeAt t prefix of
+      NONE => false
+    | SOME node => not (isEmpty node)
+
+  fun longestPrefixMatch t s =
+    let
+      val slen = String.size s
+      fun go node i best =
+        let
+          val best' =
+            case node of
+              Empty => best
+            | Node {value = SOME v, ...} => SOME (String.substring (s, 0, i), v)
+            | Node {value = NONE, ...} => best
+        in
+          if i = slen then best'
+          else
+            case node of
+              Empty => best'
+            | Node {children, ...} =>
+                let val c = String.sub (s, i) in
+                  case List.find (fn (c2, _) => c = c2) children of
+                    NONE => best'
+                  | SOME (_, child) => go child (i + 1) best'
+                end
+        end
+    in
+      go t 0 NONE
     end
 end
